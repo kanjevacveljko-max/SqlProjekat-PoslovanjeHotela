@@ -158,3 +158,24 @@ SELECT * FROM dbo.fn_RacunRezime(5);
 
 -- 5. Kreiranje multistatement table-value funkcije koja vraca sve prethodne rezervacije gosta ciji
 --    id_prosledimo.
+
+CREATE FUNCTION dbo.fn_RezervacijeZaGosta
+(
+    @id_gosta INT
+)
+RETURNS TABLE
+AS
+RETURN
+(
+    SELECT
+        r.id_rezervacije, r.id_gosta, g.ime AS ime_gosta, g.prezime AS prezime_gosta,
+        r.id_sobe, s.broj_sobe, r.datum_prijave, r.datum_odjave, r.broj_nocenja,
+        r.broj_gostiju, r.status
+    FROM dbo.Rezervacije r
+    JOIN dbo.Gosti g ON g.id_gosta = r.id_gosta
+    JOIN dbo.Sobe  s ON s.id_sobe  = r.id_sobe
+    WHERE r.id_gosta = @id_gosta
+);
+GO
+
+-- 6. 
