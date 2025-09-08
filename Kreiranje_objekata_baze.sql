@@ -16,4 +16,29 @@ JOIN dbo.Zaposleni z ON z.id_zaposlenog = r.id_zaposlenog;
 GO
 
 
+--2. Kreiranje pogleda view_SobeNaRapolaganju koji prikazuje sve sobe koje su trenutno na raspolaganju sa
+--   podacima o njima
 
+CREATE OR ALTER VIEW dbo.v_SobeNaRaspolaganju
+AS
+
+WITH Aktivne AS (
+    SELECT r.id_sobe
+    FROM dbo.Rezervacije r
+    WHERE r.status IN (N'rezervisano', N'prijavljen')
+      AND CAST(GETDATE() AS date) >= r.datum_prijave
+      AND CAST(GETDATE() AS date) <  r.datum_odjave
+    GROUP BY r.id_sobe
+)
+SELECT 
+    s.id_sobe, s.broj_sobe, s.sprat, s.tip_kreveta,
+    s.osnovna_cena, s.status
+FROM dbo.Sobe s
+LEFT JOIN Aktivne a ON a.id_sobe = s.id_sobe
+WHERE a.id_sobe IS NULL
+      AND (s.status IS NULL OR s.status NOT IN (N'zauzeta', N'van upotrebe'));
+GO
+
+
+-- 3. Kreinran funkije fn_TrenutniTrosakSobe koja nam prikazuje trenutno zaduzenje za sobu ciji smo id
+--    prosledili sa uracunatim dodantnim uslugama.
