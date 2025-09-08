@@ -1,6 +1,6 @@
 --1. Kreiranje pogleda view_PregledRezervacija koji prikazuje sve rezervacije i sve podatke o njima.
 
-CREATE VIEW dbo.view_PregledRezervacija
+CREATE OR ALTER VIEW dbo.view_PregledRezervacija
 AS
 SELECT
     r.id_rezervacije, 
@@ -12,7 +12,7 @@ SELECT
 FROM dbo.Rezervacije r
 JOIN dbo.Gosti g ON g.id_gosta = r.id_gosta
 JOIN dbo.Sobe s ON s.id_sobe = r.id_sobe
-JOIN dbo.Zaposleni z ON z.id_zaposlenog = r.id_zaposlenog;
+LEFT JOIN dbo.Zaposleni z ON z.id_zaposlenog = r.id_zaposlenog;
 GO
 
 
@@ -42,7 +42,6 @@ GO
 
 -- 3. Kreinran funkije fn_TrenutniTrosakSobe koja nam prikazuje trenutno zaduzenje za sobu ciji smo id
 --    prosledili sa uracunatim dodantnim uslugama.
-
 
 CREATE OR ALTER FUNCTION dbo.fn_TrenutniTrosakSobe
 (
@@ -98,7 +97,6 @@ SELECT dbo.fn_TrenutniTrosakSobe(5) AS trosak_do_danas;
 --4. Kreiranje inline table-value funkcije fn_RacunRezime koja nam vraca racun po stavkama za rezervaciju ciji smo
 --   id prosledili funkciji.
 
-
 CREATE FUNCTION dbo.fn_RacunRezime
 (
     @id_rezervacije INT
@@ -127,6 +125,10 @@ BEGIN
     FROM dbo.Rezervacije r
     JOIN dbo.Sobe s ON s.id_sobe = r.id_sobe
     WHERE r.id_rezervacije = @id_rezervacije;
+
+    -- guard: ako rezervacija ne postoji, ne upisuj ništa
+    IF @cena_noc IS NULL OR @br_noc IS NULL
+        RETURN;
 
     SET @soba = @cena_noc * @br_noc;
 
@@ -266,6 +268,7 @@ BEGIN
         SET @poruka = N'Predložena soba je prona?ena.';
 
 END
+GO
 
 
 -- 8. Kreiranje uskladistene procedure sp_EvidentirajPlacanje koja dodaje placanje za rezervaciju u 
@@ -279,6 +282,8 @@ CREATE PROCEDURE dbo.sp_EvidentirajPlacanje
     @valuta         NVARCHAR(10) = N'RSD'
 AS
 BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
 
     IF @iznos IS NULL OR @iznos <= 0
     BEGIN
@@ -301,15 +306,19 @@ BEGIN
         RETURN;
     END;
 
-    BEGIN TRAN;
+    BEGIN TRY
+        BEGIN TRAN;
 
-        INSERT INTO dbo.Placanja (id_rezervacije, iznos, metoda, datum_placanja, valuta)
-        VALUES (@id_rezervacije, @iznos, @metoda, @datum_placanja, @valuta);
+            INSERT INTO dbo.Placanja (id_rezervacije, iznos, metoda, datum_placanja, valuta)
+            VALUES (@id_rezervacije, @iznos, @metoda, @datum_placanja, @valuta);
 
-        DECLARE @id_novo INT = SCOPE_IDENTITY();
-
-    COMMIT TRAN;
-
+        COMMIT TRAN;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK TRAN;
+        DECLARE @msg NVARCHAR(4000) = ERROR_MESSAGE();
+        RAISERROR(@msg, 11, 1);
+    END CATCH
 END
 GO
 
@@ -347,12 +356,13 @@ BEGIN
         ROLLBACK TRANSACTION;
         RETURN;
     END
+END
+GO
 
 
  -- 10. Dodavanje trigera trg_Rezervacije_UpdDel koji sprecava brisanje rezervacije koja je povezana sa nekom
  --     uslugom ili placanjem, proverava ispravnost unosa datuma prijave i odjave i automatski racuna i menja 
  --     broj nocenja ukoliko se neki od ovih datuma promeni.
-
 
 CREATE TRIGGER dbo.trg_Rezervacije_UpdDel
 ON dbo.Rezervacije
@@ -415,3 +425,6 @@ BEGIN
     END
 END
 GO
+
+
+
