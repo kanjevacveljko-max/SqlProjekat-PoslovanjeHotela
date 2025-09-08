@@ -42,3 +42,119 @@ GO
 
 -- 3. Kreinran funkije fn_TrenutniTrosakSobe koja nam prikazuje trenutno zaduzenje za sobu ciji smo id
 --    prosledili sa uracunatim dodantnim uslugama.
+
+
+CREATE OR ALTER FUNCTION dbo.fn_TrenutniTrosakSobe
+(
+    @id_sobe INT
+)
+RETURNS DECIMAL(18,2)
+AS
+BEGIN
+    DECLARE 
+        @id_rezervacije INT,
+        @osnovna_cena  DECIMAL(10,2),
+        @datum_prijave DATE,
+        @datum_odjave  DATE,
+        @nocenja_do_danas INT,
+        @iznos_soba    DECIMAL(10,2),
+        @iznos_usluge  DECIMAL(10,2),
+        @rezultat      DECIMAL(10,2);
+
+    SELECT TOP 1
+        @id_rezervacije = r.id_rezervacije,
+        @osnovna_cena   = s.osnovna_cena,
+        @datum_prijave  = r.datum_prijave,
+        @datum_odjave   = r.datum_odjave
+    FROM dbo.Rezervacije r
+    JOIN dbo.Sobe s ON s.id_sobe = r.id_sobe
+    WHERE r.id_sobe = @id_sobe
+      AND r.status IN (N'rezervisano', N'prijavljen')
+      AND CAST(GETDATE() AS DATE) >= r.datum_prijave
+      AND CAST(GETDATE() AS DATE) <  r.datum_odjave
+    ORDER BY r.datum_prijave DESC;
+
+    IF @id_rezervacije IS NULL
+        RETURN NULL;
+
+    SET @nocenja_do_danas = DATEDIFF(DAY, @datum_prijave, CAST(GETDATE() AS DATE));
+    IF @nocenja_do_danas < 1 SET @nocenja_do_danas = 1;
+
+    SET @iznos_soba = @osnovna_cena * @nocenja_do_danas;
+
+    SELECT @iznos_usluge = ISNULL(SUM(kolicina * jedinicna_cena), 0)
+    FROM dbo.Usluge
+    WHERE id_rezervacije = @id_rezervacije
+          AND datum_usluge <= CAST(GETDATE() AS DATE);
+
+    SET @rezultat = @iznos_soba + ISNULL(@iznos_usluge, 0);
+
+    RETURN @rezultat;
+END
+GO
+SELECT dbo.fn_TrenutniTrosakSobe(5) AS trosak_do_danas;
+
+
+--4. Kreiranje inline table-value funkcije fn_RacunRezime koja nam vraca racun po stavkama za rezervaciju ciji smo
+--   id prosledili funkciji.
+
+
+CREATE FUNCTION dbo.fn_RacunRezime
+(
+    @id_rezervacije INT
+)
+RETURNS @racun TABLE
+(
+    id_rezervacije          INT,
+    iznos_soba              DECIMAL(18,2),
+    iznos_usluga            DECIMAL(18,2),
+    ukupno_placeno          DECIMAL(18,2),
+    ukupno_zaduzenje        DECIMAL(18,2),
+    saldo                   DECIMAL(18,2)
+)
+AS
+BEGIN
+    DECLARE
+        @cena_noc DECIMAL(18,2),
+        @br_noc   INT,
+        @soba     DECIMAL(18,2),
+        @usluge   DECIMAL(18,2),
+        @placeno  DECIMAL(18,2);
+
+    SELECT 
+        @cena_noc = s.osnovna_cena,
+        @br_noc   = r.broj_nocenja
+    FROM dbo.Rezervacije r
+    JOIN dbo.Sobe s ON s.id_sobe = r.id_sobe
+    WHERE r.id_rezervacije = @id_rezervacije;
+
+    SET @soba = @cena_noc * @br_noc;
+
+    SELECT @usluge = ISNULL(SUM(kolicina * jedinicna_cena), 0)
+    FROM dbo.Usluge
+    WHERE id_rezervacije = @id_rezervacije;
+
+    SELECT @placeno = ISNULL(SUM(iznos), 0)
+    FROM dbo.Placanja
+    WHERE id_rezervacije = @id_rezervacije;
+
+    INSERT INTO @racun
+    VALUES
+    (
+        @id_rezervacije,
+        @soba,
+        @usluge,
+        @placeno,
+        @soba + @usluge,
+        (@soba + @usluge) - @placeno
+    );
+
+    RETURN;
+END
+GO
+
+SELECT * FROM dbo.fn_RacunRezime(5);
+
+
+-- 5. Kreiranje multistatement table-value funkcije koja vraca sve prethodne rezervacije gosta ciji
+--    id_prosledimo.
