@@ -268,3 +268,49 @@ BEGIN
 END
 
 
+-- 8. Kreiranje uskladistene procedure sp_EvidentirajPlacanje koja dodaje placanje za rezervaciju u 
+--    u tabelu placanja.
+
+CREATE PROCEDURE dbo.sp_EvidentirajPlacanje
+    @id_rezervacije INT,
+    @iznos          DECIMAL(10,2),
+    @metoda         NVARCHAR(20),
+    @datum_placanja DATE = NULL,  
+    @valuta         NVARCHAR(10) = N'RSD'
+AS
+BEGIN
+
+    IF @iznos IS NULL OR @iznos <= 0
+    BEGIN
+        RAISERROR (N'Iznos pla?anja mora biti ve?i od nule.', 11, 1);
+        RETURN;
+    END;
+
+    IF @datum_placanja IS NULL
+        SET @datum_placanja = CAST(GETDATE() AS DATE);
+
+    IF NOT EXISTS (SELECT 1 FROM dbo.Rezervacije WHERE id_rezervacije = @id_rezervacije)
+    BEGIN
+        RAISERROR (N'Rezervacija ne postoji.', 11, 1);
+        RETURN;
+    END;
+
+    IF EXISTS (SELECT 1 FROM dbo.Rezervacije WHERE id_rezervacije = @id_rezervacije AND status = N'otkazano')
+    BEGIN
+        RAISERROR (N'Pla?anje nije dozvoljeno za otkazanu rezervaciju.', 11, 1);
+        RETURN;
+    END;
+
+    BEGIN TRAN;
+
+        INSERT INTO dbo.Placanja (id_rezervacije, iznos, metoda, datum_placanja, valuta)
+        VALUES (@id_rezervacije, @iznos, @metoda, @datum_placanja, @valuta);
+
+        DECLARE @id_novo INT = SCOPE_IDENTITY();
+
+    COMMIT TRAN;
+
+END
+GO
+
+-- 9. 
