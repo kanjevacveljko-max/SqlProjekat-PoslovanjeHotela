@@ -178,4 +178,93 @@ RETURN
 );
 GO
 
--- 6. 
+-- 6. Kreiranje procedure sp_DodajUslugu koja prihvata ulazne parametre i dodaje novu uslugu u tabelu usluge
+
+CREATE PROCEDURE dbo.sp_DodajUslugu
+    @id_rezervacije INT,
+    @id_zaposlenog  INT = NULL,
+    @opis_usluge    NVARCHAR(200),
+    @kolicina       INT = 1,
+    @jedinicna_cena DECIMAL(10,2),
+    @datum_usluge   DATE = NULL
+AS
+
+BEGIN
+
+    SET NOCOUNT ON;
+
+    IF @datum_usluge IS NULL
+        SET @datum_usluge = CAST(GETDATE() AS DATE);
+
+    IF @kolicina IS NULL OR @kolicina <= 0
+    BEGIN
+        RAISERROR (N'Koli?ina mora biti ve?a od nule.', 11, 1);
+        RETURN;
+    END;
+
+    IF @jedinicna_cena IS NULL OR @jedinicna_cena < 0
+    BEGIN
+        RAISERROR (N'Jedini?na cena ne može biti negativna.', 11, 1);
+        RETURN;
+    END;
+
+    INSERT INTO dbo.Usluge
+        (id_rezervacije, id_zaposlenog, datum_usluge, opis_usluge, kolicina, jedinicna_cena)
+    VALUES
+        (@id_rezervacije, @id_zaposlenog, @datum_usluge, @opis_usluge, @kolicina, @jedinicna_cena);
+
+END
+GO
+
+
+-- 7. Kreinranje uskladistene procedure sp_PredloziSobu koja na osnovu ulaznih parametara u vidu 
+--    datuma prijave i odjave, tipa kreveta i maksimalne cene pronalazi sobu koja je u tom trenutku
+--    slobodna i koja se uklapa u kriterijume
+
+CREATE PROCEDURE dbo.sp_PredloziSobu
+    @od       DATE,
+    @do       DATE,
+    @tip_kreveta NVARCHAR(30) = NULL,
+    @max_cena   DECIMAL(10,2) = NULL,
+    @id_sobe INT OUTPUT,
+    @poruka  NVARCHAR(200) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF @od IS NULL OR @do IS NULL
+    BEGIN
+        RAISERROR (N'Parametri @od i @do su obavezni.', 11, 1);
+        RETURN;
+    END
+
+    IF @do <= @od
+    BEGIN
+        RAISERROR (N'Datum odjave mora biti strogo ve?i od datuma prijave.', 11, 1);
+        RETURN;
+    END
+
+    SET @id_sobe = NULL;
+
+    SELECT TOP (1) @id_sobe = s.id_sobe
+    FROM dbo.Sobe s
+    WHERE (s.status IS NULL OR s.status NOT IN (N'van upotrebe'))
+      AND (@tip_kreveta IS NULL OR s.tip_kreveta = @tip_kreveta)
+      AND (@max_cena IS NULL OR s.osnovna_cena <= @max_cena)
+      AND NOT EXISTS (
+            SELECT 1
+            FROM dbo.Rezervacije r
+            WHERE r.id_sobe = s.id_sobe
+              AND r.status IN (N'rezervisano', N'prijavljen')
+              AND NOT (@do <= r.datum_prijave OR @od >= r.datum_odjave)
+      )
+    ORDER BY s.osnovna_cena, s.sprat, s.broj_sobe;
+
+    IF @id_sobe IS NULL
+        SET @poruka = N'Nema slobodnih soba koje ispunjavaju uslove u traženom terminu.';
+    ELSE
+        SET @poruka = N'Predložena soba je prona?ena.';
+
+END
+
+
