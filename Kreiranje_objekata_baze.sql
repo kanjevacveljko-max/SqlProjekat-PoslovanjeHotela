@@ -313,4 +313,105 @@ BEGIN
 END
 GO
 
--- 9. 
+-- 9. Kreiranje trigera trg_Usluge_Insert koji proverava podatke koji su uneti u tabelu usluge, sprecava
+--    unos nedozvoljenih podataka i unos usluge za rezervaciju koja je otkazana ili odjavljena
+
+CREATE TRIGGER dbo.trg_Usluge_Insert
+ON dbo.Usluge
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        WHERE (i.kolicina IS NULL OR i.kolicina <= 0)
+           OR (i.jedinicna_cena IS NULL OR i.jedinicna_cena < 0)
+           OR (i.datum_usluge IS NULL)
+    )
+    BEGIN
+        RAISERROR (N'Neispravna stavka usluge: koli?ina > 0, cena ? 0, datum_usluge nije NULL.', 11, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN dbo.Rezervacije r ON r.id_rezervacije = i.id_rezervacije
+        WHERE r.status IN (N'otkazano', N'odjavljen')
+    )
+    BEGIN
+        RAISERROR (N'Nije dozvoljeno dodavanje usluge na otkazanu ili odjavljenu rezervaciju.', 11, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+
+ -- 10. Dodavanje trigera trg_Rezervacije_UpdDel koji sprecava brisanje rezervacije koja je povezana sa nekom
+ --     uslugom ili placanjem, proverava ispravnost unosa datuma prijave i odjave i automatski racuna i menja 
+ --     broj nocenja ukoliko se neki od ovih datuma promeni.
+
+
+CREATE TRIGGER dbo.trg_Rezervacije_UpdDel
+ON dbo.Rezervacije
+AFTER UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    /* --- DELETE deo: blokiraj brisanje ako postoje povezani zapisi --- */
+    IF EXISTS (SELECT 1 FROM deleted) AND NOT EXISTS (SELECT 1 FROM inserted)
+    BEGIN
+        IF EXISTS (
+            SELECT 1
+            FROM deleted d
+            JOIN dbo.Usluge u ON u.id_rezervacije = d.id_rezervacije
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM deleted d
+            JOIN dbo.Placanja p ON p.id_rezervacije = d.id_rezervacije
+        )
+        BEGIN
+            RAISERROR (N'Brisanje rezervacije nije dozvoljeno: postoje povezane usluge ili pla?anja.', 11, 1);
+            ROLLBACK TRANSACTION;
+            RETURN;
+        END
+        RETURN; -- nema UPDATE dela u slu?aju ?istog DELETE-a
+    END
+
+    /* --- UPDATE deo: validacija datuma --- */
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        WHERE i.datum_odjave < i.datum_prijave
+    )
+    BEGIN
+        RAISERROR (N'Datum odjave ne može biti pre datuma prijave.', 11, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    /* --- UPDATE deo: ako su menjani datumi, izra?unaj broj_nocenja (min 1) --- */
+    IF (UPDATE(datum_prijave) OR UPDATE(datum_odjave))
+    BEGIN
+        ;WITH src AS (
+            SELECT 
+                i.id_rezervacije,
+                CASE 
+                    WHEN DATEDIFF(DAY, i.datum_prijave, i.datum_odjave) < 1 THEN 1
+                    ELSE DATEDIFF(DAY, i.datum_prijave, i.datum_odjave)
+                END AS novi_broj
+            FROM inserted i
+        )
+        UPDATE r
+        SET r.broj_nocenja = s.novi_broj
+        FROM dbo.Rezervacije r
+        JOIN src s ON s.id_rezervacije = r.id_rezervacije;
+        -- Napomena: okida? ?e se ponovo aktivirati, ali pošto se datumi tad ne menjaju,
+        -- uslov UPDATE(datum_prijave) / UPDATE(datum_odjave) ne?e biti istinit ? nema petlje.
+    END
+END
+GO
