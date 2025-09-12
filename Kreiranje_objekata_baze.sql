@@ -198,104 +198,105 @@ go
 --    datuma prijave i odjave, tipa kreveta i maksimalne cene pronalazi sobu koja je u tom trenutku
 --    slobodna i koja se uklapa u kriterijume
 
-CREATE PROCEDURE dbo.sp_PredloziSobu
-    @od       DATE,
-    @do       DATE,
-    @tip_kreveta NVARCHAR(30) = NULL,
-    @max_cena   DECIMAL(10,2) = NULL,
-    @id_sobe INT OUTPUT,
-    @poruka  NVARCHAR(200) OUTPUT
-AS
-BEGIN
+create procedure sp_PredloziSobu(
+    @od date,
+    @do date,
+    @tip_kreveta nvarchar(30) = null,
+    @max_cena decimal(10,2) = null,
+    @id_sobe int output,
+    @poruka nvarchar(200) output)
+as
+begin
 
-    IF @od IS NULL OR @do IS NULL
-    BEGIN
-        RAISERROR (N'Parametri @od i @do su obavezni.', 11, 1);
-        RETURN;
-    END
+    if @od is null or @do is null
+    begin
+        raiserror (N'Parametri @od i @do su obavezni.', 11, 1);
+        return;
+    end
 
-    IF @do <= @od
-    BEGIN
-        RAISERROR (N'Datum odjave mora biti strogo ve?i od datuma prijave.', 11, 1);
-        RETURN;
-    END
+    if @do <= @od
+    begin
+        raiserror (N'Datum odjave mora biti strogo ve?i od datuma prijave.', 11, 1);
+        return;
+    end
 
-    SET @id_sobe = NULL;
+    set @id_sobe = null;
 
-    SELECT TOP (1) @id_sobe = s.id_sobe
-    FROM dbo.Sobe s
-    WHERE (s.status IS NULL OR s.status NOT IN (N'van upotrebe'))
-      AND (@tip_kreveta IS NULL OR s.tip_kreveta = @tip_kreveta)
-      AND (@max_cena IS NULL OR s.osnovna_cena <= @max_cena)
-      AND NOT EXISTS (
-            SELECT 1
-            FROM dbo.Rezervacije r
-            WHERE r.id_sobe = s.id_sobe
-              AND r.status IN (N'rezervisano', N'prijavljen')
-              AND NOT (@do <= r.datum_prijave OR @od >= r.datum_odjave)
+    select top (1) @id_sobe = s.id_sobe
+    from Sobe s
+    where (s.status is null or s.status not in (N'van upotrebe'))
+      and (@tip_kreveta is null or s.tip_kreveta = @tip_kreveta)
+      and (@max_cena is null or s.osnovna_cena <= @max_cena)
+      and not exists (
+            select 1
+            from Rezervacije r
+            where r.id_sobe = s.id_sobe
+              and r.status in (N'rezervisano', N'prijavljen')
+              and not (@do <= r.datum_prijave or @od >= r.datum_odjave)
       )
-    ORDER BY s.osnovna_cena, s.sprat, s.broj_sobe;
+    order by s.osnovna_cena, s.sprat, s.broj_sobe;
 
-    IF @id_sobe IS NULL
-        SET @poruka = N'Nema slobodnih soba koje ispunjavaju uslove u 
+    if @id_sobe is null
+        set @poruka = N'Nema slobodnih soba koje ispunjavaju uslove u 
         traženom terminu.';
-    ELSE
-        SET @poruka = N'Predložena soba je prona?ena.';
-
-END
-GO
+    else
+        set @poruka = N'Predložena soba je pronadjena.';
+end
+go
 
 
 -- 8. Kreiranje uskladistene procedure sp_EvidentirajPlacanje koja dodaje placanje za rezervaciju u 
 --    u tabelu placanja.
 
-CREATE PROCEDURE dbo.sp_EvidentirajPlacanje
-    @id_rezervacije INT,
-    @iznos          DECIMAL(10,2),
-    @metoda         NVARCHAR(20),
-    @datum_placanja DATE = NULL,  
-    @valuta         NVARCHAR(10) = N'RSD'
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET XACT_ABORT ON;
+create procedure sp_EvidentirajPlacanje
+    @id_rezervacije int,
+    @iznos decimal(10,2),
+    @metoda nvarchar(20),
+    @datum_placanja date = null,  
+    @valuta nvarchar(10) = N'RSD'
+as
+begin
+    set nocount on;
+    set xact_abort on;
 
-    IF @iznos IS NULL OR @iznos <= 0
-    BEGIN
-        RAISERROR (N'Iznos pla?anja mora biti ve?i od nule.', 11, 1);
-        RETURN;
-    END;
+    if @iznos IS NULL OR @iznos <= 0
+    begin
+        raiserror (N'Iznos placanja mora biti veci od nule.', 11, 1);
+        return;
+    end;
 
-    IF @datum_placanja IS NULL
-        SET @datum_placanja = CAST(GETDATE() AS DATE);
+    if @datum_placanja is null
+        set @datum_placanja = cast(getdate() as date);
 
-    IF NOT EXISTS (SELECT 1 FROM dbo.Rezervacije WHERE id_rezervacije = @id_rezervacije)
-    BEGIN
-        RAISERROR (N'Rezervacija ne postoji.', 11, 1);
-        RETURN;
-    END;
+    if not exists (select 1 from Rezervacije where id_rezervacije = @id_rezervacije)
+    begin
+        raiserror (N'Rezervacija ne postoji.', 11, 1);
+        return;
+    end;
 
-    IF EXISTS (SELECT 1 FROM dbo.Rezervacije WHERE id_rezervacije = @id_rezervacije AND status = N'otkazano')
-    BEGIN
-        RAISERROR (N'Pla?anje nije dozvoljeno za otkazanu rezervaciju.', 11, 1);
-        RETURN;
-    END;
+    if exists (select 1 from dbo.Rezervacije where id_rezervacije = @id_rezervacije 
+               and status = N'otkazano')
+    begin
+        raiserror (N'Placanje nije dozvoljeno za otkazanu rezervaciju.', 11, 1);
+        return;
+    end;
 
-    BEGIN TRY
-        BEGIN TRAN;
+    begin try
 
-            INSERT INTO dbo.Placanja (id_rezervacije, iznos, metoda, datum_placanja, valuta)
-            VALUES (@id_rezervacije, @iznos, @metoda, @datum_placanja, @valuta);
+        begin tran
 
-        COMMIT TRAN;
-    END TRY
-    BEGIN CATCH
-        IF @@TRANCOUNT > 0 ROLLBACK TRAN;
-        DECLARE @msg NVARCHAR(4000) = ERROR_MESSAGE();
-        RAISERROR(@msg, 11, 1);
-    END CATCH
-END
-GO
+            insert into Placanja (id_rezervacije, iznos, metoda, datum_placanja, valuta)
+            values (@id_rezervacije, @iznos, @metoda, @datum_placanja, @valuta);
+
+            commit tran;
+    end try
+    begin catch
+        if @@TRANCOUNT > 0 rollback tran;
+        declare @msg nvarchar(4000) = ERROR_MESSAGE();
+        raiserror(@msg, 11, 1);
+    end catch
+end
+go
 
 -- 9. Kreiranje trigera trg_Usluge_Insert koji proverava podatke koji su uneti u tabelu usluge, sprecava
 --    unos nedozvoljenih podataka i unos usluge za rezervaciju koja je otkazana ili odjavljena
