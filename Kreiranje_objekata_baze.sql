@@ -301,105 +301,105 @@ go
 -- 9. Kreiranje trigera trg_Usluge_Insert koji proverava podatke koji su uneti u tabelu usluge, sprecava
 --    unos nedozvoljenih podataka i unos usluge za rezervaciju koja je otkazana ili odjavljena
 
-CREATE TRIGGER dbo.trg_Usluge_Insert
-ON dbo.Usluge
-AFTER INSERT
-AS
-BEGIN
-    SET NOCOUNT ON;
+create trigger trg_Usluge_Insert
+on Usluge
+after insert
+as
+begin 
+    set nocount on;
 
-    IF EXISTS (
-        SELECT 1
-        FROM inserted i
-        WHERE (i.kolicina IS NULL OR i.kolicina <= 0)
-           OR (i.jedinicna_cena IS NULL OR i.jedinicna_cena < 0)
-           OR (i.datum_usluge IS NULL)
+    if exists(
+        select 1
+        from inserted i
+        where (i.kolicina is null or i.kolicina <= 0)
+           or (i.jedinicna_cena is null or i.jedinicna_cena < 0)
+           or (i.datum_usluge is null)
     )
-    BEGIN
-        RAISERROR (N'Neispravna stavka usluge: koli?ina > 0, cena ? 0, 
+    begin
+        raiserror (N'Neispravna stavka usluge: kolicina > 0, cena > 0, 
         datum_usluge nije NULL.', 11, 1);
-        ROLLBACK TRANSACTION;
-        RETURN;
-    END
+        rollback transaction;
+        return;
+    end
 
-    IF EXISTS (
-        SELECT 1
-        FROM inserted i
-        JOIN dbo.Rezervacije r ON r.id_rezervacije = i.id_rezervacije
-        WHERE r.status IN (N'otkazano', N'odjavljen')
+    if exists (
+        select 1
+        from inserted i join Rezervacije r 
+             on r.id_rezervacije = i.id_rezervacije
+        where r.status in (N'otkazano', N'odjavljen')
     )
-    BEGIN
-        RAISERROR (N'Nije dozvoljeno dodavanje usluge na otkazanu ili 
+    begin
+        raiserror (N'Nije dozvoljeno dodavanje usluge na otkazanu ili 
         odjavljenu rezervaciju.', 11, 1);
-        ROLLBACK TRANSACTION;
-        RETURN;
-    END
-END
-GO
+        rollback transaction;
+        return;
+    end
+end
+go
 
 
  -- 10. Dodavanje trigera trg_Rezervacije_UpdDel koji sprecava brisanje rezervacije koja je povezana sa nekom
  --     uslugom ili placanjem, proverava ispravnost unosa datuma prijave i odjave i automatski racuna i menja 
  --     broj nocenja ukoliko se neki od ovih datuma promeni.
 
-CREATE TRIGGER dbo.trg_Rezervacije_UpdDel
-ON dbo.Rezervacije
-AFTER UPDATE, DELETE
-AS
-BEGIN
-    SET NOCOUNT ON;
+create trigger trg_Rezervacije_UpdDel
+on Rezervacije
+after update, delete
+as
+begin
+    set nocount on;
 
     /* --- DELETE deo: blokiraj brisanje ako postoje povezani zapisi --- */
-    IF EXISTS (SELECT 1 FROM deleted) AND NOT EXISTS (SELECT 1 FROM inserted)
-    BEGIN
-        IF EXISTS (
-            SELECT 1
-            FROM deleted d
-            JOIN dbo.Usluge u ON u.id_rezervacije = d.id_rezervacije
+    if exists(select 1 from deleted) and not exists (select 1 from inserted)
+    begin
+        if exists(
+            select 1
+            from deleted d join Usluge u 
+                 on u.id_rezervacije = d.id_rezervacije
         )
-        OR EXISTS (
-            SELECT 1
-            FROM deleted d
-            JOIN dbo.Placanja p ON p.id_rezervacije = d.id_rezervacije
+        or exists (
+            select 1
+            from deleted d join Placanja p 
+                 on p.id_rezervacije = d.id_rezervacije
         )
-        BEGIN
-            RAISERROR (N'Brisanje rezervacije nije dozvoljeno: postoje 
-            povezane usluge ili pla?anja.', 11, 1);
-            ROLLBACK TRANSACTION;
-            RETURN;
-        END
-        RETURN;
-    END
+        begin
+            raiserror (N'Brisanje rezervacije nije dozvoljeno: postoje 
+            povezane usluge ili placanja.', 11, 1);
+            rollback transaction;
+            return;
+        end
+        return;
+    end
 
-    IF EXISTS (
-        SELECT 1
-        FROM inserted i
-        WHERE i.datum_odjave < i.datum_prijave
+    if exists(
+        select 1
+        from inserted i
+        where i.datum_odjave < i.datum_prijave
     )
-    BEGIN
-        RAISERROR (N'Datum odjave ne može biti pre datuma prijave.', 11, 1);
-        ROLLBACK TRANSACTION;
-        RETURN;
-    END
+    begin
+        raiserror (N'Datum odjave ne može biti pre datuma prijave.', 11, 1);
+        rollback transaction;
+        return;
+    end
 
-    IF (UPDATE(datum_prijave) OR UPDATE(datum_odjave))
-    BEGIN
-        ;WITH src AS (
-            SELECT 
+    if (update(datum_prijave) or update(datum_odjave))
+    begin
+         with src as(
+            select 
                 i.id_rezervacije,
-                CASE 
-                    WHEN DATEDIFF(DAY, i.datum_prijave, i.datum_odjave) < 1 THEN 1
-                    ELSE DATEDIFF(DAY, i.datum_prijave, i.datum_odjave)
-                END AS novi_broj
-            FROM inserted i
+                case
+                    when datediff(day, i.datum_prijave, i.datum_odjave) < 1 THEN 1
+                    else datediff(day, i.datum_prijave, i.datum_odjave)
+                end as novi_broj
+            from inserted i
         )
-        UPDATE r
-        SET r.broj_nocenja = s.novi_broj
-        FROM dbo.Rezervacije r
-        JOIN src s ON s.id_rezervacije = r.id_rezervacije;
-    END
-END
-GO
+        update r
+        set r.broj_nocenja = s.novi_broj
+        from dbo.Rezervacije r join src s
+             on s.id_rezervacije = r.id_rezervacije;
+    end
+end
+go
 
 
 
