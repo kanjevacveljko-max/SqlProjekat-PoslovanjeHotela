@@ -141,69 +141,57 @@ end
 go
 
         
-
-
 -- 5. Kreiranje multistatement table-value funkcije koja vraca sve prethodne rezervacije gosta ciji
 --    id prosledimo.
 
-CREATE FUNCTION dbo.fn_RezervacijeZaGosta
-(
-    @id_gosta INT
-)
-RETURNS TABLE
-AS
-RETURN
-(
-    SELECT
-        r.id_rezervacije, r.id_gosta, 
-        g.ime AS ime_gosta, g.prezime AS prezime_gosta,
-        r.id_sobe, s.broj_sobe, r.datum_prijave, 
-        r.datum_odjave, r.broj_nocenja,
-        r.broj_gostiju, r.status
-    FROM dbo.Rezervacije r
-    JOIN dbo.Gosti g ON g.id_gosta = r.id_gosta
-    JOIN dbo.Sobe  s ON s.id_sobe  = r.id_sobe
-    WHERE r.id_gosta = @id_gosta
-);
-GO
+create function fun_RezervacijeGosta(@idGosta int)
+returns table
+as
+return ( select r.id_rezervacije, r.id_gosta, g.ime as ime_gosta, 
+                g.prezime as prezime_gosta, r.id_sobe, s.broj_sobe,
+                r.datum_prijave, r.datum_odjave, r.broj_nocenja,
+                r.broj_gostiju, r.status
+         from sobe s join rezervacije r
+             on s.id_sobe = r.id_sobe
+             join gosti g
+             on g.id_gosta = r.id_gosta
+         where r.id_gosta = @idGosta
+         );
+go
 
 -- 6. Kreiranje procedure sp_DodajUslugu koja prihvata ulazne parametre i dodaje novu uslugu u tabelu usluge
 
-CREATE PROCEDURE dbo.sp_DodajUslugu
-    @id_rezervacije INT,
-    @id_zaposlenog  INT = NULL,
-    @opis_usluge    NVARCHAR(200),
-    @kolicina       INT = 1,
-    @jedinicna_cena DECIMAL(10,2),
-    @datum_usluge   DATE = NULL
-AS
+create procedure sp_DodajUslugu(
+        @idRezervacije int,
+        @idZaposlenog int,
+        @datumUsluge date = null,
+        @opisUsluge nvarchar(300),
+        @kolicina int = 1,
+        @jedinicna_cena real)
+as
+begin
+    if @datumUsluge is null
+        set @datumUsluge = cast(getdate() as date);
 
-BEGIN
+    if @kolicina <= 0
+    begin
+        raiserror(N'Kolicina mora bit veca od nule', 11, 1);
+        return;
+    end
 
-    SET NOCOUNT ON;
+    if @jedinicna_cena < 0
+    begin
+        raiserror(N'Jedinicna cena ne moze biti negativna', 11, 1);
+        return;
+    end
 
-    IF @datum_usluge IS NULL
-        SET @datum_usluge = CAST(GETDATE() AS DATE);
+    insert into Usluge (id_rezervacije, id_zaposlenog, datum_usluge, 
+                        opis_usluge, kolicina, jedinicna_cena)
+    values (@idRezervacije, @idZaposlenog, @datumUsluge, @opisUsluge,
+                        @kolicina, @jedinicna_cena);
+end
+go
 
-    IF @kolicina IS NULL OR @kolicina <= 0
-    BEGIN
-        RAISERROR (N'Koli?ina mora biti ve?a od nule.', 11, 1);
-        RETURN;
-    END;
-
-    IF @jedinicna_cena IS NULL OR @jedinicna_cena < 0
-    BEGIN
-        RAISERROR (N'Jedini?na cena ne može biti negativna.', 11, 1);
-        RETURN;
-    END;
-
-    INSERT INTO dbo.Usluge
-        (id_rezervacije, id_zaposlenog, datum_usluge, opis_usluge, kolicina, jedinicna_cena)
-    VALUES
-        (@id_rezervacije, @id_zaposlenog, @datum_usluge, @opis_usluge, @kolicina, @jedinicna_cena);
-
-END
-GO
 
 
 -- 7. Kreinranje uskladistene procedure sp_PredloziSobu koja na osnovu ulaznih parametara u vidu 
