@@ -1,15 +1,193 @@
+--1. Kreiranje pogleda view_PregledRezervacija koji prikazuje sve rezervacije i sve podatke o njima.
+
+create view dbo.view_PregledRezervacija
+as
+select
+    r.id_rezervacije, 
+    g.id_gosta, g.ime as ime_gosta, g.prezime as prezime_gosta, g.telefon as telefon_gosta, 
+    g.email as email_gosta, s.id_sobe, s.broj_sobe, s.sprat, s.tip_kreveta, s.osnovna_cena,
+    z.id_zaposlenog, z.ime as ime_zaposlenog, z.prezime as prezime_zaposlenog,
+    r.datum_prijave, r.datum_odjave, r.broj_nocenja, r.broj_gostiju, r.status, r.datum_kreiranja,
+    r.broj_nocenja * s.osnovna_cena as cena_sobe
+from dbo.Rezervacije r
+join dbo.Gosti g on g.id_gosta = r.id_gosta
+join dbo.Sobe s on s.id_sobe = r.id_sobe
+left join dbo.Zaposleni z on z.id_zaposlenog = r.id_zaposlenog;
+go
+
+--2. Kreiranje pogleda view_SobeNaRapolaganju koji prikazuje sve sobe koje su trenutno na raspolaganju sa
+--   podacima o njima
+
+create view dbo.view_SobeNaRaspolaganju
+as
+
+with Aktivne as (
+    select r.id_sobe
+    from dbo.Rezervacije r
+    where r.status in (N'rezervisano', N'prijavljen')
+      and cast(getdate() as date) >= r.datum_prijave
+      AND cast(getdate() as date) <  r.datum_odjave
+    group by r.id_sobe
+)
+select 
+    s.id_sobe, s.broj_sobe, s.sprat, s.tip_kreveta,
+    s.osnovna_cena, s.status
+from dbo.Sobe s left join Aktivne a 
+     on a.id_sobe = s.id_sobe
+where a.id_sobe is null
+      and (s.status is null or s.status not in
+      (N'zauzeta', N'van upotrebe'));
+go
+
+-- 3. Kreinran funkije fn_TrenutniTrosakSobe koja nam prikazuje trenutno zaduzenje za sobu ciji smo id
+--    prosledili sa uracunatim dodantnim uslugama.
+
+alter function fn_TrenutniTrosakSobe(@idSobe int)
+returns real
+as
+begin
+    declare @danasnji_datum date = cast(getdate() as date),
+            @id_rezervacije int,
+            @datum_prijave date,
+            @datum_odjave date,
+            @nocenja_do_danas int,
+            @osnovna_cena real,
+            @iznos_soba real,
+            @iznos_usluge real,
+            @rezultat real;
+
+    select top 1
+        @id_rezervacije = r.id_rezervacije,
+        @datum_prijave = r.datum_prijave,
+        @datum_odjave = r.datum_odjave,
+        @osnovna_cena = s.osnovna_cena
+    from rezervacije r inner join sobe s 
+         on r.id_sobe = r.id_sobe
+    where r.id_sobe = @idSobe and
+          @danasnji_datum > @datum_prijave and
+          @danasnji_datum < @datum_odjave and
+          r.status in (N'prijavljen', N'rezervisano')
+    order by r.datum_prijave desc
+
+    if @id_rezervacije is null
+        return null;
+
+    set @nocenja_do_danas = datediff(day, @datum_prijave, @danasnji_datum);
+    if @nocenja_do_danas < 1
+        set @nocenja_do_danas = 1;
+
+    set @iznos_soba = @nocenja_do_danas * @osnovna_cena;
+
+    select @iznos_usluge = isnull(sum(kolicina * jedinicna_cena), 0)
+    from usluge
+    where id_rezervacije = @id_rezervacije and
+          datum_usluge <= @danasnji_datum;
+
+    set @rezultat = @iznos_soba + isnull(@iznos_usluge, 0);
+
+    return @rezultat;
+
+end
+go
+
+--4. Kreiranje inline table-value funkcije fn_RacunRezime koja nam vraca racun po stavkama za rezervaciju ciji smo
+--   id prosledili funkciji.
+
+create function fn_RacunRezime(@idRezervacije int)
+returns @Rezultat table(
+        id_rezervacije int,
+        iznos_soba real,
+        iznos_usluge real,
+        ukupno_zaduzenje real,
+        ukupno_placeno real,
+        saldo real)
+as
+begin
+    declare @broj_nocenja int,
+            @cena_noc real,
+            @soba real,
+            @usluge real,
+            @placeno real;
+
+    select 
+        @broj_nocenja = r.broj_nocenja,
+        @cena_noc = s.osnovna_cena
+    from rezervacije r join sobe s 
+         on r.id_sobe = s.id_sobe
+    where r.id_rezervacije = @idRezervacije;
+
+    if @cena_noc is null or @broj_nocenja is null 
+        return;
+
+    set @soba = @cena_noc * @broj_nocenja;
+
+    select @usluge = isnull(sum(kolicina * jedinicna_cena), 0)
+    from usluge
+    where id_rezervacije = @idRezervacije;
+
+    select @placeno = isnull(sum(iznos), 0)
+    from placanja
+    where id_rezervacije = @idRezervacije;
+
+    insert into @Rezultat (id_rezervacije, iznos_soba, iznos_usluge, ukupno_zaduzenje,
+                          ukupno_placeno, saldo)
+    values (@idRezervacije, @soba, @usluge, @soba+@usluge, @placeno, @soba+@usluge-@placeno);
+
+    return;
+end
+go
+
+-- 5. Kreiranje multistatement table-value funkcije koja vraca sve prethodne rezervacije gosta ciji
+--    id prosledimo.
+
+create function fun_RezervacijeGosta(@idGosta int)
+returns table
+as
+return ( select r.id_rezervacije, r.id_gosta, g.ime as ime_gosta, 
+                g.prezime as prezime_gosta, r.id_sobe, s.broj_sobe,
+                r.datum_prijave, r.datum_odjave, r.broj_nocenja,
+                r.broj_gostiju, r.status
+         from sobe s join rezervacije r
+             on s.id_sobe = r.id_sobe
+             join gosti g
+             on g.id_gosta = r.id_gosta
+         where r.id_gosta = @idGosta
+         );
+go
 
 
+-- 6. Kreiranje procedure sp_DodajUslugu koja prihvata ulazne parametre i dodaje novu uslugu u tabelu usluge
 
+create procedure sp_DodajUslugu(
+        @idRezervacije int,
+        @idZaposlenog int,
+        @datumUsluge date = null,
+        @opisUsluge nvarchar(300),
+        @kolicina int = 1,
+        @jedinicna_cena real)
+as
+begin
+    if @datumUsluge is null
+        set @datumUsluge = cast(getdate() as date);
 
+    if @kolicina <= 0
+    begin
+        raiserror(N'Kolicina mora bit veca od nule', 11, 1);
+        return;
+    end
 
+    if @jedinicna_cena < 0
+    begin
+        raiserror(N'Jedinicna cena ne moze biti negativna', 11, 1);
+        return;
+    end
 
-
-
-
-
-        
-
+    insert into Usluge (id_rezervacije, id_zaposlenog, datum_usluge, 
+                        opis_usluge, kolicina, jedinicna_cena)
+    values (@idRezervacije, @idZaposlenog, @datumUsluge, @opisUsluge,
+                        @kolicina, @jedinicna_cena);
+end
+go
 
 
 -- 7. Kreinranje uskladistene procedure sp_PredloziSobu koja na osnovu ulaznih parametara u vidu 
