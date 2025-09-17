@@ -1,19 +1,4 @@
---1. Kreiranje pogleda view_PregledRezervacija koji prikazuje sve rezervacije i sve podatke o njima.
 
-create view dbo.view_PregledRezervacija
-as
-select
-    r.id_rezervacije, 
-    g.id_gosta, g.ime as ime_gosta, g.prezime as prezime_gosta, g.telefon as telefon_gosta, 
-    g.email as email_gosta, s.id_sobe, s.broj_sobe, s.sprat, s.tip_kreveta, s.osnovna_cena,
-    z.id_zaposlenog, z.ime as ime_zaposlenog, z.prezime as prezime_zaposlenog,
-    r.datum_prijave, r.datum_odjave, r.broj_nocenja, r.broj_gostiju, r.status, r.datum_kreiranja,
-    r.broj_nocenja * s.osnovna_cena as cena_sobe
-from dbo.Rezervacije r
-join dbo.Gosti g on g.id_gosta = r.id_gosta
-join dbo.Sobe s on s.id_sobe = r.id_sobe
-left join dbo.Zaposleni z on z.id_zaposlenog = r.id_zaposlenog;
-go
 
 
 --2. Kreiranje pogleda view_SobeNaRapolaganju koji prikazuje sve sobe koje su trenutno na raspolaganju sa
