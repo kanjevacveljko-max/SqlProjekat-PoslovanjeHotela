@@ -1,29 +1,7 @@
 
 
 
---2. Kreiranje pogleda view_SobeNaRapolaganju koji prikazuje sve sobe koje su trenutno na raspolaganju sa
---   podacima o njima
 
-create view dbo.view_SobeNaRaspolaganju
-as
-
-with Aktivne as (
-    select r.id_sobe
-    from dbo.Rezervacije r
-    where r.status in (N'rezervisano', N'prijavljen')
-      and cast(getdate() as date) >= r.datum_prijave
-      AND cast(getdate() as date) <  r.datum_odjave
-    group by r.id_sobe
-)
-select 
-    s.id_sobe, s.broj_sobe, s.sprat, s.tip_kreveta,
-    s.osnovna_cena, s.status
-from dbo.Sobe s left join Aktivne a 
-     on a.id_sobe = s.id_sobe
-where a.id_sobe is null
-      and (s.status is null or s.status not in
-      (N'zauzeta', N'van upotrebe'));
-go
 
 
 -- 3. Kreinran funkije fn_TrenutniTrosakSobe koja nam prikazuje trenutno zaduzenje za sobu ciji smo id
