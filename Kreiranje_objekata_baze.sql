@@ -10,39 +10,6 @@
 
         
 
--- 6. Kreiranje procedure sp_DodajUslugu koja prihvata ulazne parametre i dodaje novu uslugu u tabelu usluge
-
-create procedure sp_DodajUslugu(
-        @idRezervacije int,
-        @idZaposlenog int,
-        @datumUsluge date = null,
-        @opisUsluge nvarchar(300),
-        @kolicina int = 1,
-        @jedinicna_cena real)
-as
-begin
-    if @datumUsluge is null
-        set @datumUsluge = cast(getdate() as date);
-
-    if @kolicina <= 0
-    begin
-        raiserror(N'Kolicina mora bit veca od nule', 11, 1);
-        return;
-    end
-
-    if @jedinicna_cena < 0
-    begin
-        raiserror(N'Jedinicna cena ne moze biti negativna', 11, 1);
-        return;
-    end
-
-    insert into Usluge (id_rezervacije, id_zaposlenog, datum_usluge, 
-                        opis_usluge, kolicina, jedinicna_cena)
-    values (@idRezervacije, @idZaposlenog, @datumUsluge, @opisUsluge,
-                        @kolicina, @jedinicna_cena);
-end
-go
-
 
 
 -- 7. Kreinranje uskladistene procedure sp_PredloziSobu koja na osnovu ulaznih parametara u vidu 
