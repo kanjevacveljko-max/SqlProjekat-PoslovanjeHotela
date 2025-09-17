@@ -9,23 +9,6 @@
 
 
         
--- 5. Kreiranje multistatement table-value funkcije koja vraca sve prethodne rezervacije gosta ciji
---    id prosledimo.
-
-create function fun_RezervacijeGosta(@idGosta int)
-returns table
-as
-return ( select r.id_rezervacije, r.id_gosta, g.ime as ime_gosta, 
-                g.prezime as prezime_gosta, r.id_sobe, s.broj_sobe,
-                r.datum_prijave, r.datum_odjave, r.broj_nocenja,
-                r.broj_gostiju, r.status
-         from sobe s join rezervacije r
-             on s.id_sobe = r.id_sobe
-             join gosti g
-             on g.id_gosta = r.id_gosta
-         where r.id_gosta = @idGosta
-         );
-go
 
 -- 6. Kreiranje procedure sp_DodajUslugu koja prihvata ulazne parametre i dodaje novu uslugu u tabelu usluge
 
